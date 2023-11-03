@@ -1,0 +1,44 @@
+* 简介
+选择中级 ROP 里的 ret2csu 。
+
+* 思路
+主要利用的是 lic 里的 lic_csu_init 函数，这个函数是用来初始化 lic 的，并且方便反弹 shell 的 system 和 execve 等函数都在 libc 里，且大部分应用程序都会调用 libc 里的函数。
+
+所以最基本的思路就是通过 target 里调用的 libc 函数来定位到 libc 里其他函数的地址，比如 execve ，之后再构造需要反弹的 shell 之类的参数，通过栈移出到 ret_addr 那里来执行。
+
+* 实现
+
+** __libc_csu_init 函数的利用
+查阅资料得知，该函数有一段代码可以设置 x86_64 中三个用于传递参数的寄存器 rsi rdx 和  rdi ，在 level5 这个 elf 文件中，该代码片段如下：
+#+BEGIN_SRC
+0x00400600      4c89ea         mov rdx, r13      ; 将r13的值（原来的arg3）复制到rdx
+0x00400603      4c89f6         mov rsi, r14      ; 将r14的值（原来的arg2）复制到rsi
+0x00400606      4489ff         mov edi, r15d     ; 将r15d的值（原来的arg1）复制到edi
+0x00400609      41ff14dc       call qword [r12 + rbx*8] ; 通过[r12 + rbx*8]计算得到的地址调用函数，rbx是索引，每次迭代增加8
+0x0040060d      4883c301       add rbx, 1        ; 将rbx加1，指向下一个函数指针
+0x00400611      4839eb         cmp rbx, rbp      ; 比较rbx和rbp，检查是否已经遍历了整个数组
+0x00400614      75ea           jne 0x400600      ; 如果rbx < rbp，意味着还没调用完所有函数，跳回0x400600继续循环
+#+END_SRC
+
+** 获取 libc.so 的版本
+获取 libc 版本前需要先分清楚一个函数的真实地址和其在 libc.so 中的地址的区别。
+
++ libc.so 中的地址：就是函数在 libc.so 中的地址，这个地址是不变的。
++ 真实地址：程序执行时，函数在内存中的地址，程序基址+偏移量。
+
+由此，通过程序执行时 csu 的利用，可以获得一个函数在 libc.so 中的地址，由此确定 libc.so 的版本号和在程序中的地址，进一步确定目标函数 (如execve, system) 等函数的具体地址。
+
+通过反编译 level5 这个程序可以看出，它使用了 write 和 read 两个函数。
+
+#+BEGIN_IMAGE
+[[file:writeup/20231103_153707.png]]
+#+END_IMAGE
+
+#+BEGIN_IMAGE
+[[file:writeup/20231103_153742.png]]
+#+END_IMAGE
+
+于是可以通过这两个函数的地址来确定 libc 的版本等信息。
+
+* 工具
+- radare2
