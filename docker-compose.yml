@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  kali:
+    image: dockerproxy.com/kalilinux/kali-last-release
+    platform: linux/amd64
+    volumes:
+      - ~/Documents/Tasks/Courses/AtkDef/lab2:/root/lab2
+    stdin_open: true
+    tty: true
+
