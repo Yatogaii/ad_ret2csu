@@ -144,8 +144,24 @@ call 操作完成后，ret 会返回到原来的指令，如下：
 基本流程如下：
 
 1. 第一次利用 csu ，获取 write 相对 GTO 的地址偏移量，确定 libc 的版本，从而获取 execve 的地址偏移量。
-2. 写入 .bss 段。
+2. 第二次利用 csu ，把 execve 地址和 "/bin/sh"  写入 .bss 段。
 3. 最后一次利用 csu ，执行 execve 反弹 shell ，完成 ROP 利用。
+
+** 第一次利用
+需要执行的目标函数 :write ，输出 write 在内存中的地址偏移量，并以此找到 libc 的版本。
+
+因此各个寄存器数据填充为：
+1. rbx = 0 ; 为了计算 call qword [r12 + rbx*8] ，这里置为0
+2. rbp = 1 ; 和 rbx 不一样，让下面的 jne 不跳转。
+3. r12 = write.got ; call 指令所调用的地址，这里要把内存地址给 write 到标准输出，所以这个需要是 write.got
+4. r13 = 1 ; write 的第一个参数，1 为标准输出
+5. r14 = write.got ; write 函数的 GOT 地址
+6. r15 = 8 ; wirte 函数的第三个参数，输出 8 个字节。
+7. ret = main ; main 函数地址，返回到 main 继续执行，方便之后利用
+
+** 第二次利用
+
+** 第三次利用
 
 * tip
 
