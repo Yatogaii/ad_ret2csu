@@ -159,6 +159,16 @@ call 操作完成后，ret 会返回到原来的指令，如下：
 6. r15 = 8 ; wirte 函数的第三个参数，输出 8 个字节。
 7. ret = main ; main 函数地址，返回到 main 继续执行，方便之后利用
 
+构造完毕 payload 并进行利用之后得到 write 的 GOT 地址为 6278066737626506568，十六进制为 0x57202c6f6c6c6400.
+
+在 [[https://libc.blukat.me/?q=write%3A400][libc database search]] 这个网站上搜索得到如下的结果：
+
+#+BEGIN_IMAGE
+[[file:writeup/20231104_213942.png]]
+#+END_IMAGE
+
+由于程序是 x64 的，所以直接锁定 libc 版本为 libc6-amd64_2.13-0ubuntu13.2_i386。
+
 ** 第二次利用
 
 ** 第三次利用

