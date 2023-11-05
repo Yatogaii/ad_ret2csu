@@ -164,13 +164,19 @@ call 操作完成后，ret 会返回到原来的指令，如下：
 
 在 [[https://libc.blukat.me/?q=write%3A400][libc database search]] 这个网站上搜索可以得到对应的 libc 版本，这里直接使用有心人封装好的 LibcSearcher 。
 
+注意，我找到的教程都是只用了 write 的地址，这导致 LibcSearcher 要从10个里面选一个，很不人性化，我用了 write 和 read 就只需要四选一了，并且前两个都行，后面两个没试过但是估计也行，要是使用 __libc_start_main 估计范围更小。
+
 ** 获取 /bin/sh 等参数字符串
 
 找到了 execve 的地址，还需要获取 '/bin/sh' 这个字符串来获取 shell ，但是程序里没有这个字符串，需要手动写入，一般写入到 .bss 段内比较合适.
 
-再次利用一次 csu ，调用 read 函数从标准输入读取相应的字符串到 bss 内即可。
+再次利用一次 csu ，调用 read(0, bss_addr, 16) 函数从标准输入读取相应的字符串到 bss 内即可。
+
+这里使用 sh.send() 来向程序发送这16个所需的字节。
 
 ** 获取 shell
+
+再执行一次 csu 利用函数，调用之前写入 bss 段的 execve 和 bss+8 处的 /bin/sh ，获取 shell 。
 
 * tip
 
@@ -180,3 +186,7 @@ ret 指令：在 x64 机器中，弹出8个字节的数据，并作为地址返�
 
 * 工具
 - radare2
+
+
+* Github
+[[https://github.com/Yatogaii/ad_ret2csu][ad_ret2csu]]
